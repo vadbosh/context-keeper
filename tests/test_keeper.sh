@@ -118,16 +118,25 @@ dec="$(printf '%s' "$out" | python3 -c 'import json, sys; print(json.load(sys.st
 if [ "$rc" -eq 0 ] && [ "$dec" = block ] && [ ! -e "$CONTEXT_KEEPER_DIR/s-7.md" ]; then
     ok "snapshot: compaction the user did not ask for is blocked, nothing written"
 else no "snapshot: compaction the user did not ask for is blocked, nothing written" "rc $rc, decision [$dec]"; fi
-case "$(printf '%s' "$out" | field message)" in *"run /compact"*) ok "snapshot: the block tells the user to run /compact" ;;
-    *) no "snapshot: the block tells the user to run /compact" "got [$out]" ;; esac
+# Claude Code shows nothing a PreCompact hook prints, so the announcement comes
+# from the next UserPromptSubmit, once.
 auto7 () { printf '{"session_id":"s-7","transcript_path":"%s","cwd":"%s","trigger":"%s"}' "$tr" "$repo" "$1" | "$CK" snapshot; }
-out="$(auto7 auto)"
-dec="$(printf '%s' "$out" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("decision", ""))')"
-if [ "$dec" = block ] && [ -z "$(printf '%s' "$out" | field message)" ]; then ok "snapshot: a second block in the session is silent"
-else no "snapshot: a second block in the session is silent" "got [$out]"; fi
-auto7 manual > /dev/null
-case "$(auto7 auto | field message)" in *"run /compact"*) ok "snapshot: after the user compacts, the next block is announced again" ;;
-    *) no "snapshot: after the user compacts, the next block is announced again" "silent" ;; esac
+notice7 () { printf '{"session_id":"s-7"}' | "$CK" notice; }
+n1="$(notice7)"; n2="$(notice7)"
+case "$(printf '%s' "$n1" | field message)" in *"run /compact"*)
+    if [ -z "$n2" ]; then ok "notice: the next prompt tells the user once to run /compact"
+    else no "notice: the next prompt tells the user once to run /compact" "said it twice"; fi ;;
+    *) no "notice: the next prompt tells the user once to run /compact" "got [$n1]" ;; esac
+case "$(printf '%s' "$n1" | field context)" in *"Say so to the user"*) ok "notice: the model is asked to mention it in its reply" ;;
+    *) no "notice: the model is asked to mention it in its reply" "no context" ;; esac
+auto7 auto > /dev/null
+if [ -z "$(notice7)" ]; then ok "notice: later blocks in the session stay silent"
+else no "notice: later blocks in the session stay silent" "announced again"; fi
+auto7 manual > /dev/null; auto7 auto > /dev/null
+case "$(notice7 | field message)" in *"run /compact"*) ok "notice: after the user compacts, the next block is announced again" ;;
+    *) no "notice: after the user compacts, the next block is announced again" "silent" ;; esac
+if [ -z "$(printf '{"session_id":"never-blocked"}' | "$CK" notice)" ]; then ok "notice: a session never blocked hears nothing"
+else no "notice: a session never blocked hears nothing" "it printed"; fi
 out="$(printf '{"session_id":"s-8","transcript_path":"%s","cwd":"%s","trigger":"auto"}' "$tr" "$repo" | "$CK" snapshot --allow-auto)"
 if [ -z "$out" ] && [ -s "$CONTEXT_KEEPER_DIR/s-8.md" ]; then ok "snapshot --allow-auto: automatic compaction goes on, with a snapshot"
 else no "snapshot --allow-auto: automatic compaction goes on, with a snapshot" "out [$out]"; fi
@@ -191,12 +200,14 @@ cmds = lambda k: [x["command"] for b in h.get(k, []) for x in b["hooks"]]
 pre = cmds("PreCompact"); start = [b for b in h.get("SessionStart", [])]
 ours_start = [b["matcher"] for b in start for x in b["hooks"]
               if x["command"].endswith(("context-keeper restore", "context-keeper resume"))]
+notice = sum(c.endswith("context-keeper notice") for c in cmds("UserPromptSubmit"))
 print(f"pre={sum(c.endswith('context-keeper snapshot') for c in pre)} foreign={'echo foreign' in pre} "
-      f"start={len(ours_start)}:{','.join(ours_start)} window={d.get('autoCompactWindow')} model={d.get('model')}")
+      f"start={len(ours_start)}:{','.join(ours_start)} notice={notice} "
+      f"window={d.get('autoCompactWindow')} model={d.get('model')}")
 PY
 }
 s1="$(state)"
-if [ "$s1" = "pre=1 foreign=True start=2:compact,resume window=400000 model=kept-by-the-user" ]; then
+if [ "$s1" = "pre=1 foreign=True start=2:compact,resume notice=1 window=400000 model=kept-by-the-user" ]; then
     ok "install: hooks, window, and the user's own entries ($s1)"
 else no "install: hooks, window, and the user's own entries" "got [$s1]"; fi
 check "install: the rule lands" test -s "$home/.claude/rules/context-keeper.md"
@@ -225,11 +236,12 @@ a1="$(precmd)"
 inst > /dev/null 2>&1
 a2="$(precmd)"
 if [ "$a1" = "\"$home/bin/context-keeper snapshot --allow-auto\"" ] && [ "$a2" = "\"$home/bin/context-keeper snapshot\"" ]; then
-    ok "install: --allow-auto switches automatic compaction on, a plain re-run off"
+    case "$(inst --allow-auto >/dev/null 2>&1; state)" in *notice=0*) ok "install: --allow-auto switches automatic compaction on, a plain re-run off" ;;
+        *) no "install: --allow-auto drops the notice hook" "got [$(state)]" ;; esac; inst > /dev/null 2>&1
 else no "install: --allow-auto switches automatic compaction on, a plain re-run off" "[$a1] then [$a2]"; fi
 inst --uninstall > /dev/null 2>&1
 s3="$(state)"
-if [ "$s3" = "pre=0 foreign=True start=0: window=600000 model=kept-by-the-user" ] &&
+if [ "$s3" = "pre=0 foreign=True start=0: notice=0 window=600000 model=kept-by-the-user" ] &&
    [ ! -e "$home/.claude/rules/context-keeper.md" ] && [ ! -e "$home/bin/context-keeper" ]; then
     ok "uninstall: ours go, the user's hook and window stay"
 else no "uninstall: ours go, the user's hook and window stay" "got [$s3]"; fi

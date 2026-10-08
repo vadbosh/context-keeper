@@ -13,7 +13,7 @@
 #   ./install.sh --uninstall      take the hooks and the rule out, keep the
 #                                 snapshots and autoCompactWindow
 #
-# Writes ~/.local/bin/context-keeper, ~/.claude/rules/context-keeper.md and three
+# Writes ~/.local/bin/context-keeper, ~/.claude/rules/context-keeper.md and four
 # hooks in ~/.claude/settings.json. A file about to change is copied first to
 # ~/.local/state/context-keeper-backups, three copies kept, never beside it.
 # Idempotent: a re-run changes nothing. Nothing outside $HOME is touched.

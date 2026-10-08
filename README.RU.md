@@ -17,8 +17,9 @@ context-keeper берёт эти факты не из пересказа, а с 
 
 | Часть | Где | Что делает |
 |---|---|---|
-| `context-keeper` | `~/.local/bin` | команда, которую запускают все три хука |
-| хук PreCompact | `~/.claude/settings.json` | `context-keeper snapshot` записывает снимок |
+| `context-keeper` | `~/.local/bin` | команда, которую запускают хуки |
+| хук PreCompact | `~/.claude/settings.json` | `context-keeper snapshot` записывает снимок или блокирует сжатие, о котором пользователь не просил |
+| хук UserPromptSubmit | `~/.claude/settings.json` | `context-keeper notice` один раз сообщает пользователю, что сжатие заблокировано |
 | хук SessionStart с matcher `compact` | `~/.claude/settings.json` | `context-keeper restore` возвращает снимок модели |
 | хук SessionStart с matcher `resume` | `~/.claude/settings.json` | `context-keeper resume` читает текущее состояние, когда к сессии возвращаются |
 | `autoCompactWindow: 400000` | `~/.claude/settings.json` | на 400 тыс. токенов пользователю предлагают сжать контекст, а не у самой границы окна |
@@ -29,16 +30,18 @@ context-keeper берёт эти факты не из пересказа, а с 
 ## Кто решает, когда сжимать
 
 Решает пользователь. Когда контекст доходит до окна, Claude Code запускает
-автоматическое сжатие, а хук PreCompact его блокирует и печатает:
+автоматическое сжатие, а хук PreCompact его блокирует. То, что печатает хук
+PreCompact, Claude Code не показывает, поэтому пользователь узнаёт о блокировке
+при следующем своём сообщении — от хука UserPromptSubmit:
 
 ```text
 context-keeper: the context reached the auto-compact threshold. Auto-compaction
 is off: run /compact when ready, or /compact <what to keep> to steer the summary.
 ```
 
-Сессия продолжается без сжатия, пока пользователь не запустит `/compact`: он
-проходит как обычно, со снимком. `/compact <что сохранить>` говорит пересказу,
-что важно в этот раз. На следующих ходах Claude Code пробует снова: строка
+Модель тоже просят сказать об этом в ответе. Сессия продолжается без сжатия,
+пока пользователь не запустит `/compact`: он проходит как обычно, со снимком.
+`/compact <что сохранить>` говорит пересказу, что важно в этот раз. На следующих ходах Claude Code пробует снова: строка
 показывается один раз, а следующие попытки блокируются молча, пока
 пользователь не сожмёт контекст. За окном место ещё есть:
 собственный предел модели выше, например 1 млн токенов при окне в 400 тыс.

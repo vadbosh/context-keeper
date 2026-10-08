@@ -11,8 +11,9 @@ from the summary's memory of them.
   context-keeper snapshot    PreCompact hook: hook JSON on stdin, writes
                              ~/.local/state/context-keeper/<session>.md.
                              Compaction the user did not ask for (trigger
-                             "auto") is blocked and the user is told to run
-                             /compact; --allow-auto lets it through.
+                             "auto") is blocked; --allow-auto lets it through.
+  context-keeper notice      UserPromptSubmit hook: after a block, tells the
+                             user once to run /compact when ready
   context-keeper restore     SessionStart hook, matcher "compact": hands the
                              snapshot of this session to the model
   context-keeper resume      SessionStart hook, matcher "resume": reads the
@@ -238,22 +239,21 @@ def cmd_snapshot(args):
     f = session_file(hook.get("session_id"))
     asked = f.with_suffix(".asked")
     # The user decides when the conversation is cut, not the threshold.
-    # Claude Code retries on later turns; the user is told once, until they
-    # compact, and every later attempt is blocked silently.
+    # Claude Code shows nothing a PreCompact hook prints (measured: no line,
+    # no transcript record), so the block only leaves a marker; `notice`, a
+    # UserPromptSubmit hook, tells the user once. Claude Code retries on later
+    # turns; those blocks change nothing until the user compacts.
     if hook.get("trigger") == "auto" and "--allow-auto" not in args:
-        out = {"decision": "block", "reason": BLOCKED}
-        if asked.exists():
-            out["suppressOutput"] = True
-        else:
-            out["systemMessage"] = BLOCKED
+        if not asked.exists():
             try:
                 STATE.mkdir(parents=True, exist_ok=True)
                 os.chmod(STATE, 0o700)
-                asked.touch()
+                asked.write_text("pending\n", encoding="utf-8")
                 prune()
             except OSError:
                 pass
-        sys.stdout.write(json.dumps(out) + "\n")
+        sys.stdout.write(json.dumps({"decision": "block", "reason": BLOCKED,
+                                     "suppressOutput": True}) + "\n")
         return 0
     try:
         STATE.mkdir(parents=True, exist_ok=True)
@@ -288,6 +288,28 @@ def cmd_restore():
         return 0
     answer(f"context-keeper: snapshot restored — {text.count(chr(10))} lines, "
            f"{len(text.encode())} bytes, from {f}", text)
+    return 0
+
+
+def cmd_notice():
+    """UserPromptSubmit hook: after a block, tell the user once — a line they
+    see, and a note that makes the model say it in its reply too."""
+    hook = read_hook()
+    asked = session_file(hook.get("session_id")).with_suffix(".asked")
+    try:
+        if asked.read_text(encoding="utf-8").strip() != "pending":
+            return 0
+        asked.write_text("told\n", encoding="utf-8")
+    except OSError:
+        return 0
+    sys.stdout.write(json.dumps({
+        "systemMessage": BLOCKED,
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": "context-keeper blocked automatic compaction: the "
+            "context passed the auto-compact threshold. Say so to the user in one "
+            "line — /compact, or /compact <what to keep>, is theirs to run when "
+            "ready — then answer as usual."}}) + "\n")
     return 0
 
 
@@ -372,6 +394,8 @@ def main(argv):
         return cmd_restore()
     if cmd == "resume":
         return cmd_resume()
+    if cmd == "notice":
+        return cmd_notice()
     if cmd == "show":
         return cmd_show(argv[2:])
     print(__doc__.split("\n\n")[2], file=sys.stderr)

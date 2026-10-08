@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0 — 2026-10-08
+
+### Fixed
+
+- **The block of automatic compaction reaches the user.** Claude Code shows
+  nothing a PreCompact hook prints: measured on a session at 436k tokens, the
+  hook blocked the compaction and the user saw no line, and the transcript has
+  no PreCompact record. The block now leaves a marker, and a new
+  UserPromptSubmit hook, `context-keeper notice`, shows the line on the user's
+  next message, once, and asks the model to say it in its reply too. It is
+  installed unless `--allow-auto` is given.
+
 ## 0.3.1 — 2026-10-08
 
 ### Changed

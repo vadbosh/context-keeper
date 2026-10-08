@@ -4,13 +4,14 @@
   patch_settings.py --bin <path> [--window N] [--allow-auto] [--dry-run] [--remove]
 
 Without --allow-auto the PreCompact hook blocks compaction Claude Code starts
-on its own; the user runs /compact.
+on its own, a UserPromptSubmit hook running `<bin> notice` tells the user once,
+and the user runs /compact.
 
 Adds a PreCompact hook running `<bin> snapshot`, a SessionStart hook with
 matcher "compact" running `<bin> restore`, one with matcher "resume" running
 `<bin> resume`, and sets autoCompactWindow to N (default 400000) unless the
 user already set a value. Entries are recognised by the command ending in
-`context-keeper snapshot|restore|resume`, so a re-run
+`context-keeper snapshot|restore|resume|notice`, so a re-run
 changes nothing and --remove takes out ours only. A file about to change is
 copied first to ~/.local/state/context-keeper-backups, three copies kept --
 never beside it.
@@ -50,6 +51,7 @@ def patch(data, binpath, window, remove, allow_auto=False):
     hooks = data.setdefault("hooks", {})
     pre = strip(hooks.get("PreCompact"), "snapshot")
     start = strip(hooks.get("SessionStart"), "restore", "resume")
+    prompt = strip(hooks.get("UserPromptSubmit"), "notice")
     if not remove:
         snap = f"{binpath} snapshot" + (" --allow-auto" if allow_auto else "")
         pre.append({"matcher": "", "hooks": [
@@ -58,8 +60,11 @@ def patch(data, binpath, window, remove, allow_auto=False):
             {"type": "command", "command": f"{binpath} restore", "timeout": 10}]})
         start.append({"matcher": "resume", "hooks": [
             {"type": "command", "command": f"{binpath} resume", "timeout": 15}]})
+        if not allow_auto:      # the block is announced from here; nothing to announce otherwise
+            prompt.append({"hooks": [
+                {"type": "command", "command": f"{binpath} notice", "timeout": 5}]})
         data.setdefault("autoCompactWindow", window)
-    for key, val in (("PreCompact", pre), ("SessionStart", start)):
+    for key, val in (("PreCompact", pre), ("SessionStart", start), ("UserPromptSubmit", prompt)):
         if val:
             hooks[key] = val
         else:

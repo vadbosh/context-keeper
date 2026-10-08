@@ -18,8 +18,9 @@ to carry the reasoning.
 
 | Piece | Where | What it does |
 |---|---|---|
-| `context-keeper` | `~/.local/bin` | the command the three hooks run |
-| PreCompact hook | `~/.claude/settings.json` | `context-keeper snapshot` writes the snapshot |
+| `context-keeper` | `~/.local/bin` | the command the hooks run |
+| PreCompact hook | `~/.claude/settings.json` | `context-keeper snapshot` writes the snapshot, or blocks a compaction the user did not ask for |
+| UserPromptSubmit hook | `~/.claude/settings.json` | `context-keeper notice` tells the user once that compaction was blocked |
 | SessionStart hook, matcher `compact` | `~/.claude/settings.json` | `context-keeper restore` hands it back to the model |
 | SessionStart hook, matcher `resume` | `~/.claude/settings.json` | `context-keeper resume` reads the state now when a session is picked up again |
 | `autoCompactWindow: 400000` | `~/.claude/settings.json` | at 400k tokens the user is asked to compact, instead of near the full window |
@@ -30,18 +31,22 @@ A value of `autoCompactWindow` that is already set is kept.
 ## Who decides when to compact
 
 The user does. When the context reaches the window, Claude Code starts an
-automatic compaction; the PreCompact hook blocks it and prints:
+automatic compaction, and the PreCompact hook blocks it. Claude Code shows
+nothing a PreCompact hook prints, so the user hears of it on their next
+message, from the UserPromptSubmit hook:
 
 ```text
 context-keeper: the context reached the auto-compact threshold. Auto-compaction
 is off: run /compact when ready, or /compact <what to keep> to steer the summary.
 ```
 
-The session goes on uncompacted until the user runs `/compact`, which passes
-as usual with a snapshot. `/compact <what to keep>` tells the summary what
-matters this time. Claude Code tries again on later turns; the line is shown
-once, and later attempts are blocked silently until the user compacts. Past the window there is still room: the
-model's own limit is higher, for example 1M tokens against a window of 400k.
+The model is asked to say the same in its reply. The session goes on
+uncompacted until the user runs `/compact`, which passes as usual with a
+snapshot; `/compact <what to keep>` tells the summary what matters this time.
+Claude Code tries again on later turns; the line is shown once, and later
+attempts are blocked silently until the user compacts. Past the window there
+is still room: the model's own limit is higher, for example 1M tokens against
+a window of 400k.
 
 To let Claude Code compact on its own, install with `--allow-auto`; a re-run
 without the flag turns it off again.
