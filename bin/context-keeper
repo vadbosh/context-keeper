@@ -10,9 +10,16 @@ from the summary's memory of them.
 
   context-keeper snapshot    PreCompact hook: hook JSON on stdin, writes
                              ~/.local/state/context-keeper/<session>.md
-  context-keeper restore     SessionStart hook, matcher "compact": prints the
-                             snapshot of this session; stdout goes to context
+  context-keeper restore     SessionStart hook, matcher "compact": hands the
+                             snapshot of this session to the model
+  context-keeper resume      SessionStart hook, matcher "resume": reads the
+                             state now — time away, git state, commits made
+                             since the last activity — and hands it over
   context-keeper show [ID]   print a snapshot by hand (default: the newest)
+
+Both hooks answer in JSON: `additionalContext` goes to the model and
+`systemMessage` tells the user, in one line, what was handed over. `resume`
+writes nothing to disk.
 
 The snapshot is passed through `secrets-redact --filter` when that command
 exists, and the directory is mode 700: it holds the user's own words.
@@ -27,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 STATE = Path(os.environ.get("CONTEXT_KEEPER_DIR") or
@@ -65,12 +73,13 @@ def text_of(content):
 
 
 def scan_transcript(path):
-    """Changed files (newest last) and typed user requests, from the JSONL."""
-    files, requests = [], []
+    """Changed files (newest last), typed user requests and the timestamp of
+    the newest entry, from the JSONL."""
+    files, requests, last = [], [], ""
     try:
         fh = open(path, encoding="utf-8", errors="replace")
     except (OSError, TypeError):
-        return files, requests
+        return files, requests, last
     with fh:
         for line in fh:
             try:
@@ -79,6 +88,8 @@ def scan_transcript(path):
                 continue
             if not isinstance(e, dict):
                 continue
+            if isinstance(e.get("timestamp"), str):
+                last = max(last, e["timestamp"])
             msg = e.get("message")
             if not isinstance(msg, dict):
                 continue
@@ -101,7 +112,7 @@ def scan_transcript(path):
                 # A bare /compact is the trigger itself, not a request worth a slot.
                 if t and t != "/compact" and not t.lower().startswith(NOT_TYPED):
                     requests.append(t)
-    return files[-MAX_FILES:], requests[-MAX_REQUESTS:]
+    return files[-MAX_FILES:], requests[-MAX_REQUESTS:], last
 
 
 def run(cmd, cwd=None):
@@ -109,7 +120,9 @@ def run(cmd, cwd=None):
         r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return ""
-    return r.stdout.strip() if r.returncode == 0 else ""
+    # rstrip only: the leading space of ` M file` in `status --short` is the
+    # difference between a staged and an unstaged change.
+    return r.stdout.rstrip() if r.returncode == 0 else ""
 
 
 def git_root(path):
@@ -143,14 +156,19 @@ def kb_state(roots):
     return out
 
 
-def build(hook):
-    files, requests = scan_transcript(hook.get("transcript_path"))
-    cwd = hook.get("cwd") or os.getcwd()
+def repo_roots(cwd, files):
     roots = []
     for p in [cwd] + files:
         r = git_root(p)
         if r and r not in roots:
             roots.append(r)
+    return roots
+
+
+def build(hook):
+    files, requests, _ = scan_transcript(hook.get("transcript_path"))
+    cwd = hook.get("cwd") or os.getcwd()
+    roots = repo_roots(cwd, files)
     stamp = time.strftime("%Y-%m-%d %H:%M:%S %Z")
     parts = [
         f"# context-keeper snapshot — {stamp}",
@@ -219,12 +237,80 @@ def cmd_snapshot():
     return 0
 
 
+def answer(message, context=""):
+    """A SessionStart hook's JSON: one line for the user, text for the model."""
+    out = {"systemMessage": message}
+    if context:
+        out["hookSpecificOutput"] = {"hookEventName": "SessionStart",
+                                     "additionalContext": context}
+    sys.stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
+
+
 def cmd_restore():
     hook = read_hook()
     f = session_file(hook.get("session_id"))
     try:
-        sys.stdout.write(f.read_text(encoding="utf-8"))
+        text = f.read_text(encoding="utf-8")
     except OSError:
+        answer("context-keeper: no snapshot of this session to restore")
+        return 0
+    answer(f"context-keeper: snapshot restored — {text.count(chr(10))} lines, "
+           f"{len(text.encode())} bytes, from {f}", text)
+    return 0
+
+
+def parse_ts(ts):
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+
+
+def away(seconds):
+    m = int(seconds // 60)
+    d, h, m = m // 1440, m % 1440 // 60, m % 60
+    return " ".join(f"{n}{u}" for n, u in ((d, "d"), (h, "h"), (m, "m")) if n) or "<1m"
+
+
+def cmd_resume():
+    """The state now, for a session picked up again: what the conversation
+    cannot know is what happened while nobody was in it."""
+    hook = read_hook()
+    try:
+        files, _, last = scan_transcript(hook.get("transcript_path"))
+        cwd = hook.get("cwd") or os.getcwd()
+        roots = repo_roots(cwd, files)
+        now = datetime.now(timezone.utc)
+        then = parse_ts(last)
+        gap = away((now - then).total_seconds()) if then else "unknown"
+        parts = [
+            f"# context-keeper: state on return — {now:%Y-%m-%d %H:%M:%S} UTC",
+            "",
+            f"Session `{hook.get('session_id', '?')}` resumed in `{cwd}`. Last activity "
+            f"in it: {then:%Y-%m-%d %H:%M:%S} UTC, {gap} ago." if then else
+            f"Session `{hook.get('session_id', '?')}` resumed in `{cwd}`.",
+            "Read from the machine now. Where the conversation above says otherwise",
+            "about dates, files or commits, this wins.",
+            "",
+        ]
+        new_commits = 0
+        for root in roots[:6]:
+            branch = run(["git", "-C", root, "status", "-sb"]).splitlines()[:1]
+            changes = run(["git", "-C", root, "status", "--short"]).splitlines()
+            since = run(["git", "-C", root, "log", "--oneline", "-10",
+                         f"--since={last}"]).splitlines() if then else []
+            new_commits += len(since)
+            if not changes and not since:
+                parts += [f"- `{root}`: {(branch or ['?'])[0]}, clean, no commits since", ""]
+                continue
+            parts += [f"## {root}", "", "```", *(branch or ["(no branch line)"])]
+            parts += changes[:15] + ([f"... {len(changes) - 15} more"] if len(changes) > 15 else [])
+            parts += ["", "commits since the last activity:" if since else
+                      "no commits since the last activity", *since, "```", ""]
+        text = redact("\n".join(parts).rstrip() + "\n")
+        answer(f"context-keeper: away {gap}; state of {len(roots[:6])} repositories "
+               f"read now, {new_commits} new commits", text)
+    except Exception:   # noqa: BLE001 — a hook must never stop the session
         pass
     return 0
 
@@ -252,6 +338,8 @@ def main(argv):
         return cmd_snapshot()
     if cmd == "restore":
         return cmd_restore()
+    if cmd == "resume":
+        return cmd_resume()
     if cmd == "show":
         return cmd_show(argv[2:])
     print(__doc__.split("\n\n")[2], file=sys.stderr)

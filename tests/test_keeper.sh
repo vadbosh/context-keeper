@@ -23,7 +23,8 @@ export CONTEXT_KEEPER_DIR="$tmp/state"
 repo="$tmp/repo"
 mkdir -p "$repo"
 git -C "$repo" init -q
-git -C "$repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "first commit of the fixture"
+GIT_AUTHOR_DATE=2025-12-31T00:00:00Z GIT_COMMITTER_DATE=2025-12-31T00:00:00Z \
+    git -C "$repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "first commit of the fixture"
 printf 'x\n' > "$repo/changed.txt"
 
 tr="$tmp/transcript.jsonl"
@@ -62,12 +63,43 @@ if grep -q -e "a tool result" -e "injected meta" -e "<command-name>" -e "^> /com
 else ok "snapshot: tool results, meta text and commands are not requests"; fi
 
 # ── restore ─────────────────────────────────────────────────────────────────
+# field <name>: systemMessage or additionalContext of the hook JSON on stdin.
+field () {
+    python3 -c 'import json, sys
+d = json.load(sys.stdin)
+print(d.get("systemMessage", "") if sys.argv[1] == "message"
+      else d.get("hookSpecificOutput", {}).get("additionalContext", ""))' "$1"
+}
 out="$(printf '%s' "$hook" | "$CK" restore)"
-if [ "$out" = "$(cat "$snap")" ]; then ok "restore: prints the snapshot of the session"
-else no "restore: prints the snapshot of the session" "output differs"; fi
+if [ "$(printf '%s' "$out" | field context)" = "$(cat "$snap")" ]; then ok "restore: hands the snapshot of the session to the model"
+else no "restore: hands the snapshot of the session to the model" "context differs"; fi
+case "$(printf '%s' "$out" | field message)" in
+    "context-keeper: snapshot restored"*) ok "restore: tells the user it restored the snapshot" ;;
+    *) no "restore: tells the user it restored the snapshot" "message [$(printf '%s' "$out" | field message)]" ;; esac
 out="$(printf '%s' '{"session_id":"other"}' | "$CK" restore)"; rc=$?
-if [ -z "$out" ] && [ "$rc" -eq 0 ]; then ok "restore: another session gets nothing, exit 0"
-else no "restore: another session gets nothing, exit 0" "rc $rc, ${#out} bytes"; fi
+if [ -z "$(printf '%s' "$out" | field context)" ] && [ "$rc" -eq 0 ]; then ok "restore: another session gets no context, exit 0"
+else no "restore: another session gets no context, exit 0" "rc $rc"; fi
+
+# ── resume ──────────────────────────────────────────────────────────────────
+# A session left a while ago: one commit was made in the repository since.
+printf '{"type":"user","timestamp":"2026-01-01T00:00:00.000Z","message":{"role":"user","content":"left here"}}\n' > "$tmp/tr5.jsonl"
+printf '{"type":"assistant","timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"%s/changed.txt"}}]}}\n' "$repo" >> "$tmp/tr5.jsonl"
+git -C "$repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "made while the session was away"
+before="$(find "$CONTEXT_KEEPER_DIR" -type f | wc -l)"
+out="$(printf '{"session_id":"s-5","transcript_path":"%s","cwd":"%s"}' "$tmp/tr5.jsonl" "$repo" | "$CK" resume)"
+ctx="$(printf '%s' "$out" | field context)"; msg="$(printf '%s' "$out" | field message)"
+case "$ctx" in *"state on return"*"Last activity in it: 2026-01-01 00:00:01 UTC"*"made while the session was away"*)
+    ok "resume: the time away and the commits made since go to the model" ;;
+    *) no "resume: the time away and the commits made since go to the model" "got [$ctx]" ;; esac
+case "$msg" in "context-keeper: away "*"d "*"state of 1 repositories read now, 1 new commits")
+    ok "resume: tells the user what it read ($msg)" ;;
+    *) no "resume: tells the user what it read" "message [$msg]" ;; esac
+case "$ctx" in *"first commit of the fixture"*) no "resume: commits from before the last activity are left out" "an old commit is listed" ;;
+    *) ok "resume: commits from before the last activity are left out" ;; esac
+if [ "$(find "$CONTEXT_KEEPER_DIR" -type f | wc -l)" -eq "$before" ]; then ok "resume: writes nothing to disk"
+else no "resume: writes nothing to disk" "a file appeared"; fi
+printf 'garbage' | "$CK" resume > /dev/null; rc=$?
+if [ "$rc" -eq 0 ]; then ok "resume: garbage on stdin exits 0"; else no "resume: garbage on stdin exits 0" "rc $rc"; fi
 
 # ── never fails a hook ──────────────────────────────────────────────────────
 printf 'garbage' | "$CK" snapshot; rc=$?
@@ -126,13 +158,14 @@ d = json.load(open(sys.argv[1]))
 h = d.get("hooks", {})
 cmds = lambda k: [x["command"] for b in h.get(k, []) for x in b["hooks"]]
 pre = cmds("PreCompact"); start = [b for b in h.get("SessionStart", [])]
-ours_start = [b["matcher"] for b in start for x in b["hooks"] if x["command"].endswith("context-keeper restore")]
+ours_start = [b["matcher"] for b in start for x in b["hooks"]
+              if x["command"].endswith(("context-keeper restore", "context-keeper resume"))]
 print(f"pre={sum(c.endswith('context-keeper snapshot') for c in pre)} foreign={'echo foreign' in pre} "
       f"start={len(ours_start)}:{','.join(ours_start)} window={d.get('autoCompactWindow')} model={d.get('model')}")
 PY
 }
 s1="$(state)"
-if [ "$s1" = "pre=1 foreign=True start=1:compact window=400000 model=kept-by-the-user" ]; then
+if [ "$s1" = "pre=1 foreign=True start=2:compact,resume window=400000 model=kept-by-the-user" ]; then
     ok "install: hooks, window, and the user's own entries ($s1)"
 else no "install: hooks, window, and the user's own entries" "got [$s1]"; fi
 check "install: the rule lands" test -s "$home/.claude/rules/context-keeper.md"

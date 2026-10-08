@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.0 — 2026-10-08
+
+### Added
+
+- **A resumed session learns what happened while it was away.** A SessionStart
+  hook with matcher `resume` runs `context-keeper resume`. It hands the model
+  the time of the last activity, how long ago it was, and for each repository
+  touched the branch line, the uncommitted changes and the commits made since.
+  It reads the transcript and the repositories, so a session that was never
+  compacted gets it too. It writes nothing to disk.
+- **Both hooks tell the user what they did,** in one line: `snapshot
+  restored — N lines`, or `away 2d 3h; state of 3 repositories read now, 2 new
+  commits`.
+
+### Fixed
+
+- **An unstaged change looked staged in the snapshot.** The output of `git
+  status --short` lost the leading space of its first line, so ` M file` came
+  out as `M file`.
+
 ## 0.1.1 — 2026-10-08
 
 ### Fixed

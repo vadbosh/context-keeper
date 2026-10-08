@@ -18,9 +18,10 @@ to carry the reasoning.
 
 | Piece | Where | What it does |
 |---|---|---|
-| `context-keeper` | `~/.local/bin` | the command both hooks run |
+| `context-keeper` | `~/.local/bin` | the command the three hooks run |
 | PreCompact hook | `~/.claude/settings.json` | `context-keeper snapshot` writes the snapshot |
-| SessionStart hook, matcher `compact` | `~/.claude/settings.json` | `context-keeper restore` prints it into the context |
+| SessionStart hook, matcher `compact` | `~/.claude/settings.json` | `context-keeper restore` hands it back to the model |
+| SessionStart hook, matcher `resume` | `~/.claude/settings.json` | `context-keeper resume` reads the state now when a session is picked up again |
 | `autoCompactWindow: 400000` | `~/.claude/settings.json` | compaction starts at 400k tokens instead of near the full window |
 | rule | `~/.claude/rules/context-keeper.md` | tells the summary what to keep: the task, the decisions, exact paths and ids, what is unfinished |
 
@@ -39,6 +40,34 @@ Snapshots live in `~/.local/state/context-keeper`, one per session, the newest
 20 kept. The directory is mode 700 and each file 600: a snapshot holds the
 user's own words. When `secrets-redact` (from env2hell) is installed, the
 snapshot passes through it before it is written.
+
+Both SessionStart hooks also print one line for the user, such as
+`context-keeper: snapshot restored — 120 lines, 6740 bytes`.
+
+## Coming back to a session
+
+The conversation cannot know what happened while nobody was in it. When a
+session is resumed (`claude --resume`, `claude --continue`), `context-keeper
+resume` reads the state at that moment and hands it to the model:
+
+- the time of the last activity in the session and how long ago it was;
+- for every git repository touched: the branch line, uncommitted changes and
+  the commits made since the last activity;
+- a repository that is clean and has no new commits takes one line.
+
+It works the same whether the session was ever compacted or not: it reads the
+transcript and the repositories, not a snapshot. The user sees one line, such
+as `context-keeper: away 2d 3h; state of 3 repositories read now, 2 new
+commits`. Nothing is written to disk.
+
+## Disk use
+
+The disk use is bounded and needs no care. At most 20 snapshots of at most
+24000 bytes each are kept, and 3 copies of each file the installer changed.
+`~/.local/state/context-keeper` and `~/.local/state/context-keeper-backups`
+can both be deleted at any time. A snapshot is needed only from
+the moment compaction starts until the session starts again: after that it is
+part of the session transcript.
 
 ## Install
 

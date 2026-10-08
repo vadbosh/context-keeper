@@ -4,9 +4,10 @@
   patch_settings.py --bin <path> [--window N] [--dry-run] [--remove]
 
 Adds a PreCompact hook running `<bin> snapshot`, a SessionStart hook with
-matcher "compact" running `<bin> restore`, and sets autoCompactWindow to N
-(default 400000) unless the user already set a value. Entries are recognised
-by the command ending in `context-keeper snapshot|restore`, so a re-run
+matcher "compact" running `<bin> restore`, one with matcher "resume" running
+`<bin> resume`, and sets autoCompactWindow to N (default 400000) unless the
+user already set a value. Entries are recognised by the command ending in
+`context-keeper snapshot|restore|resume`, so a re-run
 changes nothing and --remove takes out ours only. A file about to change is
 copied first to ~/.local/state/context-keeper-backups, three copies kept --
 never beside it.
@@ -27,14 +28,15 @@ BACKUPS = os.environ.get("CONTEXT_KEEPER_BACKUP_DIR") or os.path.join(
 BACKUPS_KEPT = 3
 
 
-def ours(cmd, verb):
-    return isinstance(cmd, str) and cmd.rstrip().endswith(f"context-keeper {verb}")
+def ours(cmd, verbs):
+    return isinstance(cmd, str) and any(
+        cmd.rstrip().endswith(f"context-keeper {v}") for v in verbs)
 
 
-def strip(blocks, verb):
+def strip(blocks, *verbs):
     out = []
     for b in blocks or []:
-        hooks = [h for h in b.get("hooks", []) if not ours(h.get("command"), verb)]
+        hooks = [h for h in b.get("hooks", []) if not ours(h.get("command"), verbs)]
         if hooks:
             out.append({**b, "hooks": hooks})
     return out
@@ -43,12 +45,14 @@ def strip(blocks, verb):
 def patch(data, binpath, window, remove):
     hooks = data.setdefault("hooks", {})
     pre = strip(hooks.get("PreCompact"), "snapshot")
-    start = strip(hooks.get("SessionStart"), "restore")
+    start = strip(hooks.get("SessionStart"), "restore", "resume")
     if not remove:
         pre.append({"matcher": "", "hooks": [
             {"type": "command", "command": f"{binpath} snapshot", "timeout": 30}]})
         start.append({"matcher": "compact", "hooks": [
             {"type": "command", "command": f"{binpath} restore", "timeout": 10}]})
+        start.append({"matcher": "resume", "hooks": [
+            {"type": "command", "command": f"{binpath} resume", "timeout": 15}]})
         data.setdefault("autoCompactWindow", window)
     for key, val in (("PreCompact", pre), ("SessionStart", start)):
         if val:
