@@ -138,7 +138,7 @@ case "$(notice7 | field message)" in *"run /compact"*) ok "notice: after the use
 # The status line keeps saying it, in raspberry, until the user compacts.
 sl7 () { printf '{"session_id":"s-7"}' | "$CK" statusline; }
 s1="$(sl7)"; notice7 > /dev/null; s2="$(sl7)"; auto7 manual > /dev/null; s3="$(sl7)"
-if [[ "$s1" == $'\033[38;5;168m'*"auto-compact blocked"* ]] && [ "$s2" = "$s1" ] && [ -z "$s3" ] &&
+if [[ "$s1" == $'\033[38;5;204m'*"auto-compact blocked"* ]] && [ "$s2" = "$s1" ] && [ -z "$s3" ] &&
    [ -z "$(printf '{"session_id":"never-blocked"}' | "$CK" statusline)" ]; then
     ok "statusline: raspberry while blocked, after notice too; gone after /compact and for others"
 else no "statusline: raspberry while blocked, after notice too; gone after /compact and for others" "[$s1] [$s2] [$s3]"; fi
