@@ -135,6 +135,14 @@ else no "notice: later blocks in the session stay silent" "announced again"; fi
 auto7 manual > /dev/null; auto7 auto > /dev/null
 case "$(notice7 | field message)" in *"run /compact"*) ok "notice: after the user compacts, the next block is announced again" ;;
     *) no "notice: after the user compacts, the next block is announced again" "silent" ;; esac
+# The status line keeps saying it, in yellow, until the user compacts.
+sl7 () { printf '{"session_id":"s-7"}' | "$CK" statusline; }
+s1="$(sl7)"; notice7 > /dev/null; s2="$(sl7)"; auto7 manual > /dev/null; s3="$(sl7)"
+if [[ "$s1" == $'\033[33m'*"auto-compact blocked"* ]] && [ "$s2" = "$s1" ] && [ -z "$s3" ] &&
+   [ -z "$(printf '{"session_id":"never-blocked"}' | "$CK" statusline)" ]; then
+    ok "statusline: yellow while blocked, after notice too; gone after /compact and for others"
+else no "statusline: yellow while blocked, after notice too; gone after /compact and for others" "[$s1] [$s2] [$s3]"; fi
+auto7 auto > /dev/null
 if [ -z "$(printf '{"session_id":"never-blocked"}' | "$CK" notice)" ]; then ok "notice: a session never blocked hears nothing"
 else no "notice: a session never blocked hears nothing" "it printed"; fi
 out="$(printf '{"session_id":"s-8","transcript_path":"%s","cwd":"%s","trigger":"auto"}' "$tr" "$repo" | "$CK" snapshot --allow-auto)"

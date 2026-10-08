@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.0 — 2026-10-08
+
+### Added
+
+- **`context-keeper statusline`: the block stays in sight.** The line from
+  `notice` is shown once and scrolls away, and neither a hook's message nor
+  the reply can carry colour. The new command reads the status line JSON and
+  prints one yellow line while automatic compaction of the session is
+  blocked, until a manual `/compact`. The installer does not wire it into the
+  status line.
+
+### Documentation
+
+- The READMEs say that the threshold is the window times a percentage, and
+  that `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=85` puts a window of 400000 at 340k.
+
 ## 0.4.0 — 2026-10-08
 
 ### Fixed

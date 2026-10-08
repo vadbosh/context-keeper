@@ -20,6 +20,8 @@ from the summary's memory of them.
                              state now — time away, git state, commits made
                              since the last activity — and hands it over
   context-keeper show [ID]   print a snapshot by hand (default: the newest)
+  context-keeper statusline  status line JSON on stdin: one yellow line while
+                             automatic compaction of the session is blocked
 
 Both hooks answer in JSON: `additionalContext` goes to the model and
 `systemMessage` tells the user, in one line, what was handed over. `resume`
@@ -313,6 +315,25 @@ def cmd_notice():
     return 0
 
 
+STATUS = "\033[33m⚠ context-keeper: auto-compact blocked — /compact when ready\033[0m"
+
+
+def cmd_statusline():
+    """A status line segment: the line above, in yellow, while automatic
+    compaction of this session is blocked — from the block until a manual
+    /compact removes the marker. Nothing otherwise. The status line is the
+    one place Claude Code shows colour: a hook's systemMessage and the reply
+    have none, and `notice` speaks once, so the state scrolled away."""
+    hook = read_hook()
+    try:
+        state = session_file(hook.get("session_id")).with_suffix(".asked").read_text(encoding="utf-8").strip()
+    except OSError:
+        return 0
+    if state in ("pending", "told"):
+        print(STATUS)
+    return 0
+
+
 def parse_ts(ts):
     try:
         return datetime.fromisoformat(ts.replace("Z", "+00:00"))
@@ -398,6 +419,8 @@ def main(argv):
         return cmd_notice()
     if cmd == "show":
         return cmd_show(argv[2:])
+    if cmd == "statusline":
+        return cmd_statusline()
     print(__doc__.split("\n\n")[2], file=sys.stderr)
     return 2
 

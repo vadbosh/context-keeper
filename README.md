@@ -48,6 +48,15 @@ attempts are blocked silently until the user compacts. Past the window there
 is still room: the model's own limit is higher, for example 1M tokens against
 a window of 400k.
 
+The line scrolls away. To keep the state in sight, call
+`context-keeper statusline` from your status line command: it reads the status
+line JSON on stdin and prints one yellow line while compaction is blocked. The
+installer does not wire it.
+
+The threshold is the window times a percentage. `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`
+lowers it: with `85`, a window of 400000 is blocked at 340k. For 400k with `85`,
+set `autoCompactWindow` to 470000. `--window` sets it only where it is not set.
+
 To let Claude Code compact on its own, install with `--allow-auto`; a re-run
 without the flag turns it off again.
 
