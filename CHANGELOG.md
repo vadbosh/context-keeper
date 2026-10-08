@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 — 2026-10-08
+
+### Changed
+
+- **The user decides when to compact.** At the window Claude Code starts an
+  automatic compaction; the PreCompact hook now blocks it and tells the user
+  to run `/compact`, or `/compact <what to keep>`. A compaction the user runs
+  passes as before, with a snapshot. `./install.sh --allow-auto` brings back
+  automatic compaction; a re-run without the flag turns it off again.
+
 ## 0.2.1 — 2026-10-08
 
 ### Fixed

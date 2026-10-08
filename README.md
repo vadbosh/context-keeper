@@ -22,10 +22,29 @@ to carry the reasoning.
 | PreCompact hook | `~/.claude/settings.json` | `context-keeper snapshot` writes the snapshot |
 | SessionStart hook, matcher `compact` | `~/.claude/settings.json` | `context-keeper restore` hands it back to the model |
 | SessionStart hook, matcher `resume` | `~/.claude/settings.json` | `context-keeper resume` reads the state now when a session is picked up again |
-| `autoCompactWindow: 400000` | `~/.claude/settings.json` | compaction starts at 400k tokens instead of near the full window |
+| `autoCompactWindow: 400000` | `~/.claude/settings.json` | at 400k tokens the user is asked to compact, instead of near the full window |
 | rule | `~/.claude/rules/context-keeper.md` | tells the summary what to keep: the task, the decisions, exact paths and ids, what is unfinished |
 
 A value of `autoCompactWindow` that is already set is kept.
+
+## Who decides when to compact
+
+The user does. When the context reaches the window, Claude Code starts an
+automatic compaction; the PreCompact hook blocks it and prints:
+
+```text
+context-keeper: the context reached the auto-compact threshold. Auto-compaction
+is off: run /compact when ready, or /compact <what to keep> to steer the summary.
+```
+
+The session goes on uncompacted until the user runs `/compact`, which passes
+as usual with a snapshot. `/compact <what to keep>` tells the summary what
+matters this time. Claude Code tries again on later turns, so the line can
+come back until the user compacts. Past the window there is still room: the
+model's own limit is higher, for example 1M tokens against a window of 400k.
+
+To let Claude Code compact on its own, install with `--allow-auto`; a re-run
+without the flag turns it off again.
 
 ## What a snapshot holds
 
@@ -75,6 +94,7 @@ part of the session transcript.
 ./install.sh                 # install or update
 ./install.sh --dry-run       # print what would change
 ./install.sh --window 300000 # another compaction window, 100000 to 1000000
+./install.sh --allow-auto    # let Claude Code compact on its own at the window
 ./install.sh --uninstall     # take the hooks, the rule and the command out
 ```
 

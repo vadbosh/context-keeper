@@ -40,7 +40,7 @@ tr="$tmp/transcript.jsonl"
     printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"second request, keep paths like /opt/x exact"}]}}'
     printf '%s\n' 'not json at all'
 } > "$tr"
-hook="$(printf '{"session_id":"s-1","transcript_path":"%s","cwd":"%s","trigger":"auto"}' "$tr" "$repo")"
+hook="$(printf '{"session_id":"s-1","transcript_path":"%s","cwd":"%s","trigger":"manual"}' "$tr" "$repo")"
 
 # ── snapshot ────────────────────────────────────────────────────────────────
 printf '%s' "$hook" | "$CK" snapshot
@@ -111,6 +111,18 @@ ctx="$(printf '{"session_id":"s-6","transcript_path":"%s","cwd":"%s"}' "$tmp/tr6
 case "$ctx" in *"many-7"*) case "$ctx" in *"many-1\`"*) no "resume: the cap keeps the newest repositories" "many-1 kept" ;;
     *) ok "resume: the cap keeps the newest repositories" ;; esac ;;
     *) no "resume: the cap keeps the newest repositories" "many-7 dropped" ;; esac
+
+# ── auto-compaction is the user's call ──────────────────────────────────────
+out="$(printf '{"session_id":"s-7","transcript_path":"%s","cwd":"%s","trigger":"auto"}' "$tr" "$repo" | "$CK" snapshot)"; rc=$?
+dec="$(printf '%s' "$out" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("decision", ""))')"
+if [ "$rc" -eq 0 ] && [ "$dec" = block ] && [ ! -e "$CONTEXT_KEEPER_DIR/s-7.md" ]; then
+    ok "snapshot: compaction the user did not ask for is blocked, nothing written"
+else no "snapshot: compaction the user did not ask for is blocked, nothing written" "rc $rc, decision [$dec]"; fi
+case "$(printf '%s' "$out" | field message)" in *"run /compact"*) ok "snapshot: the block tells the user to run /compact" ;;
+    *) no "snapshot: the block tells the user to run /compact" "got [$out]" ;; esac
+out="$(printf '{"session_id":"s-8","transcript_path":"%s","cwd":"%s","trigger":"auto"}' "$tr" "$repo" | "$CK" snapshot --allow-auto)"
+if [ -z "$out" ] && [ -s "$CONTEXT_KEEPER_DIR/s-8.md" ]; then ok "snapshot --allow-auto: automatic compaction goes on, with a snapshot"
+else no "snapshot --allow-auto: automatic compaction goes on, with a snapshot" "out [$out]"; fi
 
 # ── never fails a hook ──────────────────────────────────────────────────────
 printf 'garbage' | "$CK" snapshot; rc=$?
@@ -198,6 +210,15 @@ case "$(state)" in *window=600000*) ok "install: a window the user set is kept" 
     *) no "install: a window the user set is kept" "got [$(state)]" ;; esac
 if inst --window 50000 > /dev/null 2>&1; then no "install: a window outside 100000..1000000 is refused" "accepted"
 else ok "install: a window outside 100000..1000000 is refused"; fi
+precmd () { rg -o '"[^"]*context-keeper snapshot[^"]*"' "$home/.claude/settings.json" 2>/dev/null ||
+            grep -o '"[^"]*context-keeper snapshot[^"]*"' "$home/.claude/settings.json"; }
+inst --allow-auto > /dev/null 2>&1
+a1="$(precmd)"
+inst > /dev/null 2>&1
+a2="$(precmd)"
+if [ "$a1" = "\"$home/bin/context-keeper snapshot --allow-auto\"" ] && [ "$a2" = "\"$home/bin/context-keeper snapshot\"" ]; then
+    ok "install: --allow-auto switches automatic compaction on, a plain re-run off"
+else no "install: --allow-auto switches automatic compaction on, a plain re-run off" "[$a1] then [$a2]"; fi
 inst --uninstall > /dev/null 2>&1
 s3="$(state)"
 if [ "$s3" = "pre=0 foreign=True start=0: window=600000 model=kept-by-the-user" ] &&

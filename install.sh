@@ -6,6 +6,10 @@
 #   ./install.sh --window N       auto-compact window in tokens (default 400000);
 #                                 a value already in settings.json is kept
 #   ./install.sh --bin-dir D      put the command in D instead of ~/.local/bin
+#   ./install.sh --allow-auto     let Claude Code compact on its own at the
+#                                 window; by default it is blocked there and
+#                                 the user is told to run /compact; a re-run
+#                                 without the flag turns it off again
 #   ./install.sh --uninstall      take the hooks and the rule out, keep the
 #                                 snapshots and autoCompactWindow
 #
@@ -22,6 +26,7 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 DRY_RUN=0
 WINDOW=400000
 UNINSTALL=0
+flags_auto=()
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -29,7 +34,8 @@ while [ $# -gt 0 ]; do
         --window)    WINDOW="${2:?--window needs a number}"; shift ;;
         --bin-dir)   BIN_DIR="${2:?--bin-dir needs a directory}"; shift ;;
         --uninstall) UNINSTALL=1 ;;
-        -h|--help)   sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --allow-auto) flags_auto=(--allow-auto) ;;
+        -h|--help)   sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -101,7 +107,8 @@ install_file "$SRC/bin/context-keeper" "$BIN_DIR/context-keeper" 755
 if [ -d "$HOME/.claude" ]; then
     install_file "$SRC/rules/context-keeper.md" "$HOME/.claude/rules/context-keeper.md" 644
 fi
-python3 "$SRC/lib/patch_settings.py" --bin "$BIN_DIR/context-keeper" --window "$WINDOW" "${flags[@]+"${flags[@]}"}"
+python3 "$SRC/lib/patch_settings.py" --bin "$BIN_DIR/context-keeper" --window "$WINDOW" \
+    "${flags[@]+"${flags[@]}"}" "${flags_auto[@]+"${flags_auto[@]}"}"
 
 if [ "$DRY_RUN" -eq 0 ]; then
     # The snapshot must come out of a fake session and the restore must print it.

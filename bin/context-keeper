@@ -9,7 +9,10 @@ back to the model right after it, so they come from the machine and not
 from the summary's memory of them.
 
   context-keeper snapshot    PreCompact hook: hook JSON on stdin, writes
-                             ~/.local/state/context-keeper/<session>.md
+                             ~/.local/state/context-keeper/<session>.md.
+                             Compaction the user did not ask for (trigger
+                             "auto") is blocked and the user is told to run
+                             /compact; --allow-auto lets it through.
   context-keeper restore     SessionStart hook, matcher "compact": hands the
                              snapshot of this session to the model
   context-keeper resume      SessionStart hook, matcher "resume": reads the
@@ -223,8 +226,18 @@ def prune():
         old.unlink(missing_ok=True)
 
 
-def cmd_snapshot():
+BLOCKED = ("context-keeper: the context reached the auto-compact threshold. "
+           "Auto-compaction is off: run /compact when ready, or "
+           "/compact <what to keep> to steer the summary.")
+
+
+def cmd_snapshot(args):
     hook = read_hook()
+    # The user decides when the conversation is cut, not the threshold.
+    if hook.get("trigger") == "auto" and "--allow-auto" not in args:
+        sys.stdout.write(json.dumps({"decision": "block", "reason": BLOCKED,
+                                     "systemMessage": BLOCKED}) + "\n")
+        return 0
     try:
         STATE.mkdir(parents=True, exist_ok=True)
         os.chmod(STATE, 0o700)
@@ -337,7 +350,7 @@ def cmd_show(args):
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else ""
     if cmd == "snapshot":
-        return cmd_snapshot()
+        return cmd_snapshot(argv[2:])
     if cmd == "restore":
         return cmd_restore()
     if cmd == "resume":

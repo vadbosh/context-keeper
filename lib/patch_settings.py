@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Wire context-keeper into Claude Code's settings.json, or take it out.
 
-  patch_settings.py --bin <path> [--window N] [--dry-run] [--remove]
+  patch_settings.py --bin <path> [--window N] [--allow-auto] [--dry-run] [--remove]
+
+Without --allow-auto the PreCompact hook blocks compaction Claude Code starts
+on its own; the user runs /compact.
 
 Adds a PreCompact hook running `<bin> snapshot`, a SessionStart hook with
 matcher "compact" running `<bin> restore`, one with matcher "resume" running
@@ -16,6 +19,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -30,7 +34,7 @@ BACKUPS_KEPT = 3
 
 def ours(cmd, verbs):
     return isinstance(cmd, str) and any(
-        cmd.rstrip().endswith(f"context-keeper {v}") for v in verbs)
+        re.search(rf"context-keeper {v}( --allow-auto)?$", cmd.rstrip()) for v in verbs)
 
 
 def strip(blocks, *verbs):
@@ -42,13 +46,14 @@ def strip(blocks, *verbs):
     return out
 
 
-def patch(data, binpath, window, remove):
+def patch(data, binpath, window, remove, allow_auto=False):
     hooks = data.setdefault("hooks", {})
     pre = strip(hooks.get("PreCompact"), "snapshot")
     start = strip(hooks.get("SessionStart"), "restore", "resume")
     if not remove:
+        snap = f"{binpath} snapshot" + (" --allow-auto" if allow_auto else "")
         pre.append({"matcher": "", "hooks": [
-            {"type": "command", "command": f"{binpath} snapshot", "timeout": 30}]})
+            {"type": "command", "command": snap, "timeout": 30}]})
         start.append({"matcher": "compact", "hooks": [
             {"type": "command", "command": f"{binpath} restore", "timeout": 10}]})
         start.append({"matcher": "resume", "hooks": [
@@ -78,6 +83,7 @@ def main():
     ap.add_argument("--window", type=int, default=400000)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--remove", action="store_true")
+    ap.add_argument("--allow-auto", action="store_true")
     a = ap.parse_args()
     if not os.path.isdir(os.path.dirname(SETTINGS)):
         print("  claude: ~/.claude not found — skipped")
@@ -92,7 +98,7 @@ def main():
     except ValueError:
         print(f"  claude: {SETTINGS} is not valid JSON — not touched", file=sys.stderr)
         return 1
-    after = patch(json.loads(before), a.bin, a.window, a.remove)
+    after = patch(json.loads(before), a.bin, a.window, a.remove, a.allow_auto)
     if after == data:
         print("  = ~/.claude/settings.json")
         return 0

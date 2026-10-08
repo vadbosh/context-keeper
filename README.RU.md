@@ -21,10 +21,29 @@ context-keeper берёт эти факты не из пересказа, а с 
 | хук PreCompact | `~/.claude/settings.json` | `context-keeper snapshot` записывает снимок |
 | хук SessionStart с matcher `compact` | `~/.claude/settings.json` | `context-keeper restore` возвращает снимок модели |
 | хук SessionStart с matcher `resume` | `~/.claude/settings.json` | `context-keeper resume` читает текущее состояние, когда к сессии возвращаются |
-| `autoCompactWindow: 400000` | `~/.claude/settings.json` | сжатие начинается на 400 тыс. токенов, а не у самой границы окна |
+| `autoCompactWindow: 400000` | `~/.claude/settings.json` | на 400 тыс. токенов пользователю предлагают сжать контекст, а не у самой границы окна |
 | правило | `~/.claude/rules/context-keeper.md` | говорит пересказу, что сохранить: задачу, решения, точные пути и id, недоделанное |
 
 Если `autoCompactWindow` уже задан, его значение не меняется.
+
+## Кто решает, когда сжимать
+
+Решает пользователь. Когда контекст доходит до окна, Claude Code запускает
+автоматическое сжатие, а хук PreCompact его блокирует и печатает:
+
+```text
+context-keeper: the context reached the auto-compact threshold. Auto-compaction
+is off: run /compact when ready, or /compact <what to keep> to steer the summary.
+```
+
+Сессия продолжается без сжатия, пока пользователь не запустит `/compact`: он
+проходит как обычно, со снимком. `/compact <что сохранить>` говорит пересказу,
+что важно в этот раз. На следующих ходах Claude Code пробует снова, поэтому
+строка может повторяться, пока контекст не сжат. За окном место ещё есть:
+собственный предел модели выше, например 1 млн токенов при окне в 400 тыс.
+
+Чтобы Claude Code сжимал контекст сам, установите с `--allow-auto`; повторный
+запуск без флага снова это выключает.
 
 ## Что входит в снимок
 
@@ -73,6 +92,7 @@ context-keeper берёт эти факты не из пересказа, а с 
 ./install.sh                 # установить или обновить
 ./install.sh --dry-run       # показать, что изменится
 ./install.sh --window 300000 # другое окно сжатия, от 100000 до 1000000
+./install.sh --allow-auto    # разрешить Claude Code сжимать самому на окне
 ./install.sh --uninstall     # убрать хуки, правило и команду
 ```
 
