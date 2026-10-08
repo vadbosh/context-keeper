@@ -98,7 +98,8 @@ def scan_transcript(path):
                         isinstance(c, dict) and c.get("type") == "tool_result" for c in content):
                     continue
                 t = text_of(content).strip()
-                if t and not t.lower().startswith(NOT_TYPED):
+                # A bare /compact is the trigger itself, not a request worth a slot.
+                if t and t != "/compact" and not t.lower().startswith(NOT_TYPED):
                     requests.append(t)
     return files[-MAX_FILES:], requests[-MAX_REQUESTS:]
 

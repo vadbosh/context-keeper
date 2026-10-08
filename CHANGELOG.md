@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1 — 2026-10-08
+
+### Fixed
+
+- **A typed `/compact` is no longer one of the last six requests.** The
+  transcript records it as plain text, so it took a place in the snapshot
+  that a real request should have.
+
 ## 0.1.0 — 2026-10-08
 
 ### Added

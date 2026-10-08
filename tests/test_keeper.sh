@@ -35,6 +35,7 @@ tr="$tmp/transcript.jsonl"
     printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"x","content":"a tool result, not a request"}]}}'
     printf '%s\n' '{"type":"user","isMeta":true,"message":{"role":"user","content":"injected meta text"}}'
     printf '%s\n' '{"type":"user","message":{"role":"user","content":"<command-name>/compact</command-name>"}}'
+    printf '%s\n' '{"type":"user","message":{"role":"user","content":"/compact"}}'
     printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"second request, keep paths like /opt/x exact"}]}}'
     printf '%s\n' 'not json at all'
 } > "$tr"
@@ -56,7 +57,7 @@ else no "snapshot: a file edited twice is listed once, newest last" "count $n, l
 check "snapshot: the git state of the repository" grep -q "first commit of the fixture" "$snap"
 check "snapshot: the uncommitted change" grep -q "changed.txt" "$snap"
 check "snapshot: the typed requests, verbatim" grep -q "second request, keep paths like /opt/x exact" "$snap"
-if grep -q -e "a tool result" -e "injected meta" -e "<command-name>" "$snap"; then
+if grep -q -e "a tool result" -e "injected meta" -e "<command-name>" -e "^> /compact$" "$snap"; then
     no "snapshot: tool results, meta text and commands are not requests" "one of them is in it"
 else ok "snapshot: tool results, meta text and commands are not requests"; fi
 
