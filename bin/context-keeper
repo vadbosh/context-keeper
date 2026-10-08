@@ -315,7 +315,7 @@ def cmd_notice():
     return 0
 
 
-STATUS = "\033[38;5;204m⚠ context-keeper: auto-compact blocked — /compact when ready\033[0m"
+STATUS = "\033[38;5;198m⚠ context-keeper: auto-compact blocked — /compact when ready\033[0m"
 
 
 def cmd_statusline():
