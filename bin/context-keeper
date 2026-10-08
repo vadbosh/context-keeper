@@ -221,9 +221,11 @@ def redact(text):
 
 
 def prune():
-    snaps = sorted(STATE.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
-    for old in snaps[KEEP_SNAPSHOTS:]:
-        old.unlink(missing_ok=True)
+    # Snapshots, and the empty markers of sessions already told about a block.
+    for pattern in ("*.md", "*.asked"):
+        files = sorted(STATE.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in files[KEEP_SNAPSHOTS:]:
+            old.unlink(missing_ok=True)
 
 
 BLOCKED = ("context-keeper: the context reached the auto-compact threshold. "
@@ -233,15 +235,30 @@ BLOCKED = ("context-keeper: the context reached the auto-compact threshold. "
 
 def cmd_snapshot(args):
     hook = read_hook()
+    f = session_file(hook.get("session_id"))
+    asked = f.with_suffix(".asked")
     # The user decides when the conversation is cut, not the threshold.
+    # Claude Code retries on later turns; the user is told once, until they
+    # compact, and every later attempt is blocked silently.
     if hook.get("trigger") == "auto" and "--allow-auto" not in args:
-        sys.stdout.write(json.dumps({"decision": "block", "reason": BLOCKED,
-                                     "systemMessage": BLOCKED}) + "\n")
+        out = {"decision": "block", "reason": BLOCKED}
+        if asked.exists():
+            out["suppressOutput"] = True
+        else:
+            out["systemMessage"] = BLOCKED
+            try:
+                STATE.mkdir(parents=True, exist_ok=True)
+                os.chmod(STATE, 0o700)
+                asked.touch()
+                prune()
+            except OSError:
+                pass
+        sys.stdout.write(json.dumps(out) + "\n")
         return 0
     try:
         STATE.mkdir(parents=True, exist_ok=True)
         os.chmod(STATE, 0o700)
-        f = session_file(hook.get("session_id"))
+        asked.unlink(missing_ok=True)   # compacted: the next threshold is news again
         tmp = f.with_suffix(".tmp")
         tmp.write_text(build(hook), encoding="utf-8")
         os.chmod(tmp, 0o600)

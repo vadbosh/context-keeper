@@ -120,6 +120,14 @@ if [ "$rc" -eq 0 ] && [ "$dec" = block ] && [ ! -e "$CONTEXT_KEEPER_DIR/s-7.md" 
 else no "snapshot: compaction the user did not ask for is blocked, nothing written" "rc $rc, decision [$dec]"; fi
 case "$(printf '%s' "$out" | field message)" in *"run /compact"*) ok "snapshot: the block tells the user to run /compact" ;;
     *) no "snapshot: the block tells the user to run /compact" "got [$out]" ;; esac
+auto7 () { printf '{"session_id":"s-7","transcript_path":"%s","cwd":"%s","trigger":"%s"}' "$tr" "$repo" "$1" | "$CK" snapshot; }
+out="$(auto7 auto)"
+dec="$(printf '%s' "$out" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("decision", ""))')"
+if [ "$dec" = block ] && [ -z "$(printf '%s' "$out" | field message)" ]; then ok "snapshot: a second block in the session is silent"
+else no "snapshot: a second block in the session is silent" "got [$out]"; fi
+auto7 manual > /dev/null
+case "$(auto7 auto | field message)" in *"run /compact"*) ok "snapshot: after the user compacts, the next block is announced again" ;;
+    *) no "snapshot: after the user compacts, the next block is announced again" "silent" ;; esac
 out="$(printf '{"session_id":"s-8","transcript_path":"%s","cwd":"%s","trigger":"auto"}' "$tr" "$repo" | "$CK" snapshot --allow-auto)"
 if [ -z "$out" ] && [ -s "$CONTEXT_KEEPER_DIR/s-8.md" ]; then ok "snapshot --allow-auto: automatic compaction goes on, with a snapshot"
 else no "snapshot --allow-auto: automatic compaction goes on, with a snapshot" "out [$out]"; fi

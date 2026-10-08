@@ -39,8 +39,8 @@ is off: run /compact when ready, or /compact <what to keep> to steer the summary
 
 The session goes on uncompacted until the user runs `/compact`, which passes
 as usual with a snapshot. `/compact <what to keep>` tells the summary what
-matters this time. Claude Code tries again on later turns, so the line can
-come back until the user compacts. Past the window there is still room: the
+matters this time. Claude Code tries again on later turns; the line is shown
+once, and later attempts are blocked silently until the user compacts. Past the window there is still room: the
 model's own limit is higher, for example 1M tokens against a window of 400k.
 
 To let Claude Code compact on its own, install with `--allow-auto`; a re-run

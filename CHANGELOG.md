@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1 — 2026-10-08
+
+### Changed
+
+- **The block is announced once.** Claude Code retries automatic compaction
+  on later turns. The user now sees the line on the first block only; later
+  ones are silent until the user compacts, and after that the next threshold
+  is announced again. An empty `<session>.asked` file beside the snapshots
+  remembers it; the newest 20 are kept.
+
 ## 0.3.0 — 2026-10-08
 
 ### Changed
