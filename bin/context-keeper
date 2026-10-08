@@ -315,11 +315,11 @@ def cmd_notice():
     return 0
 
 
-STATUS = "\033[38;5;132m⚠ context-keeper: auto-compact blocked — /compact when ready\033[0m"
+STATUS = "\033[38;5;168m⚠ context-keeper: auto-compact blocked — /compact when ready\033[0m"
 
 
 def cmd_statusline():
-    """A status line segment: the line above, in muted raspberry, while automatic
+    """A status line segment: the line above, in raspberry, while automatic
     compaction of this session is blocked — from the block until a manual
     /compact removes the marker. Nothing otherwise. The status line is the
     one place Claude Code shows colour: a hook's systemMessage and the reply
