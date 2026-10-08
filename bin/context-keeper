@@ -20,7 +20,7 @@ from the summary's memory of them.
                              state now — time away, git state, commits made
                              since the last activity — and hands it over
   context-keeper show [ID]   print a snapshot by hand (default: the newest)
-  context-keeper statusline  status line JSON on stdin: one yellow line while
+  context-keeper statusline  status line JSON on stdin: one raspberry line while
                              automatic compaction of the session is blocked
 
 Both hooks answer in JSON: `additionalContext` goes to the model and
@@ -315,11 +315,11 @@ def cmd_notice():
     return 0
 
 
-STATUS = "\033[33m⚠ context-keeper: auto-compact blocked — /compact when ready\033[0m"
+STATUS = "\033[38;5;132m⚠ context-keeper: auto-compact blocked — /compact when ready\033[0m"
 
 
 def cmd_statusline():
-    """A status line segment: the line above, in yellow, while automatic
+    """A status line segment: the line above, in muted raspberry, while automatic
     compaction of this session is blocked — from the block until a manual
     /compact removes the marker. Nothing otherwise. The status line is the
     one place Claude Code shows colour: a hook's systemMessage and the reply

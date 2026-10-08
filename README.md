@@ -50,7 +50,7 @@ a window of 400k.
 
 The line scrolls away. To keep the state in sight, call
 `context-keeper statusline` from your status line command: it reads the status
-line JSON on stdin and prints one yellow line while compaction is blocked. The
+line JSON on stdin and prints one raspberry line while compaction is blocked. The
 installer does not wire it.
 
 The threshold is the window times a percentage. `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`

@@ -7,7 +7,7 @@
 - **`context-keeper statusline`: the block stays in sight.** The line from
   `notice` is shown once and scrolls away, and neither a hook's message nor
   the reply can carry colour. The new command reads the status line JSON and
-  prints one yellow line while automatic compaction of the session is
+  prints one raspberry line while automatic compaction of the session is
   blocked, until a manual `/compact`. The installer does not wire it into the
   status line.
 
