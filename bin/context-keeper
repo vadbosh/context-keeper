@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""context-keeper — keep the exact state of a session across compaction.
+
+Compaction replaces the conversation with a summary, and a summary loses the
+details a long session runs on: which files were changed, what is committed
+and what is not, the exact words of the last requests, what is still open.
+This program writes those facts to disk before compaction and hands them
+back to the model right after it, so they come from the machine and not
+from the summary's memory of them.
+
+  context-keeper snapshot    PreCompact hook: hook JSON on stdin, writes
+                             ~/.local/state/context-keeper/<session>.md
+  context-keeper restore     SessionStart hook, matcher "compact": prints the
+                             snapshot of this session; stdout goes to context
+  context-keeper show [ID]   print a snapshot by hand (default: the newest)
+
+The snapshot is passed through `secrets-redact --filter` when that command
+exists, and the directory is mode 700: it holds the user's own words.
+
+Never fails a hook: any error leaves no snapshot and exits 0. Compaction
+must go on whether this program works or not.
+"""
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+STATE = Path(os.environ.get("CONTEXT_KEEPER_DIR") or
+             Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
+             / "context-keeper")
+KEEP_SNAPSHOTS = 20          # newest per machine; older ones are removed
+MAX_FILES = 40               # changed files listed
+MAX_REQUESTS = 6             # last typed requests, verbatim
+MAX_REQUEST_CHARS = 1500
+MAX_BYTES = 24000            # the whole snapshot; it is read on every turn after
+WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
+NOT_TYPED = ("<command-", "<local-command", "<system-reminder", "[request interrupted",
+             "caveat:", "<task-notification", "<user-prompt-submit-hook")
+
+
+def read_hook():
+    try:
+        data = json.loads(sys.stdin.read() or "{}")
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def session_file(session_id):
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", session_id or "unknown")
+    return STATE / f"{safe}.md"
+
+
+def text_of(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(str(c.get("text", "")) for c in content
+                         if isinstance(c, dict) and c.get("type") == "text")
+    return ""
+
+
+def scan_transcript(path):
+    """Changed files (newest last) and typed user requests, from the JSONL."""
+    files, requests = [], []
+    try:
+        fh = open(path, encoding="utf-8", errors="replace")
+    except (OSError, TypeError):
+        return files, requests
+    with fh:
+        for line in fh:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(e, dict):
+                continue
+            msg = e.get("message")
+            if not isinstance(msg, dict):
+                continue
+            content = msg.get("content")
+            if e.get("type") == "assistant" and isinstance(content, list):
+                for c in content:
+                    if isinstance(c, dict) and c.get("type") == "tool_use" \
+                            and c.get("name") in WRITE_TOOLS:
+                        inp = c.get("input") or {}
+                        p = inp.get("file_path") or inp.get("notebook_path")
+                        if isinstance(p, str) and p:
+                            if p in files:
+                                files.remove(p)
+                            files.append(p)
+            elif e.get("type") == "user" and not e.get("isMeta"):
+                if isinstance(content, list) and any(
+                        isinstance(c, dict) and c.get("type") == "tool_result" for c in content):
+                    continue
+                t = text_of(content).strip()
+                if t and not t.lower().startswith(NOT_TYPED):
+                    requests.append(t)
+    return files[-MAX_FILES:], requests[-MAX_REQUESTS:]
+
+
+def run(cmd, cwd=None):
+    try:
+        r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def git_root(path):
+    d = path if os.path.isdir(path) else os.path.dirname(path)
+    while d and not os.path.isdir(d):
+        d = os.path.dirname(d)
+    return run(["git", "-C", d, "rev-parse", "--show-toplevel"]) if d else ""
+
+
+def git_state(root):
+    branch = run(["git", "-C", root, "status", "-sb"]).splitlines()[:1]
+    changes = run(["git", "-C", root, "status", "--short"]).splitlines()
+    log = run(["git", "-C", root, "log", "--oneline", "-5"])
+    out = [f"### {root}", "", "```", *(branch or ["(no branch line)"])]
+    out += changes[:15] + ([f"... {len(changes) - 15} more"] if len(changes) > 15 else [])
+    out += ["", log or "(no commits)", "```"]
+    return "\n".join(out)
+
+
+def kb_state(roots):
+    """The newest `kind: state` note of a kb/ in any repository touched."""
+    out = []
+    for root in roots:
+        kb = Path(root) / "kb"
+        if not kb.is_dir():
+            continue
+        states = sorted(p for p in kb.glob("*.md")
+                        if "kind: state" in p.read_text(encoding="utf-8", errors="replace")[:400])
+        if states:
+            out.append(f"- {states[-1]}")
+    return out
+
+
+def build(hook):
+    files, requests = scan_transcript(hook.get("transcript_path"))
+    cwd = hook.get("cwd") or os.getcwd()
+    roots = []
+    for p in [cwd] + files:
+        r = git_root(p)
+        if r and r not in roots:
+            roots.append(r)
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S %Z")
+    parts = [
+        f"# context-keeper snapshot — {stamp}",
+        "",
+        f"Session `{hook.get('session_id', '?')}`, compaction `{hook.get('trigger', '?')}`, "
+        f"working directory `{cwd}`.",
+        "These facts were read from the machine just before compaction. Where the",
+        "summary above disagrees with them, they win; re-check anything that matters",
+        "with a command before acting on it.",
+        "",
+        "## Files changed in this session (newest last)",
+        "",
+    ]
+    parts += [f"- {f}" for f in files] or ["- none"]
+    parts += ["", "## Repositories touched", ""]
+    parts += [git_state(r) + "\n" for r in roots[:6]] or ["- none"]
+    notes = kb_state(roots)
+    if notes:
+        parts += ["## Newest kb state note", ""] + notes + [""]
+    if shutil.which("findings") and hook.get("session_id"):
+        fl = run(["findings", "list", "--session", hook["session_id"]])
+        if fl:
+            parts += ["## Open findings of this session", "", "```", fl, "```", ""]
+    parts += ["## The last requests, verbatim (oldest first)", ""]
+    for r in requests:
+        r = r if len(r) <= MAX_REQUEST_CHARS else r[:MAX_REQUEST_CHARS] + " […]"
+        parts += ["> " + line for line in r.splitlines()] + [""]
+    text = "\n".join(parts).rstrip() + "\n"
+    if len(text.encode()) > MAX_BYTES:
+        text = text.encode()[:MAX_BYTES].decode("utf-8", "ignore") + "\n[… snapshot cut]\n"
+    return redact(text)
+
+
+def redact(text):
+    tool = shutil.which("secrets-redact")
+    if not tool:
+        return text
+    try:
+        r = subprocess.run([tool, "--filter"], input=text, capture_output=True,
+                           text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return text
+    # --filter prints the masked text and exits 0 when it masked, 1 when not.
+    return r.stdout if r.stdout else text
+
+
+def prune():
+    snaps = sorted(STATE.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for old in snaps[KEEP_SNAPSHOTS:]:
+        old.unlink(missing_ok=True)
+
+
+def cmd_snapshot():
+    hook = read_hook()
+    try:
+        STATE.mkdir(parents=True, exist_ok=True)
+        os.chmod(STATE, 0o700)
+        f = session_file(hook.get("session_id"))
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(build(hook), encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        tmp.replace(f)
+        prune()
+    except Exception:   # noqa: BLE001 — a hook must never stop compaction
+        pass
+    return 0
+
+
+def cmd_restore():
+    hook = read_hook()
+    f = session_file(hook.get("session_id"))
+    try:
+        sys.stdout.write(f.read_text(encoding="utf-8"))
+    except OSError:
+        pass
+    return 0
+
+
+def cmd_show(args):
+    if args:
+        f = session_file(args[0])
+    else:
+        snaps = sorted(STATE.glob("*.md"), key=lambda p: p.stat().st_mtime)
+        if not snaps:
+            print(f"context-keeper: no snapshot in {STATE}", file=sys.stderr)
+            return 1
+        f = snaps[-1]
+    try:
+        sys.stdout.write(f.read_text(encoding="utf-8"))
+    except OSError as e:
+        print(f"context-keeper: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else ""
+    if cmd == "snapshot":
+        return cmd_snapshot()
+    if cmd == "restore":
+        return cmd_restore()
+    if cmd == "show":
+        return cmd_show(argv[2:])
+    print(__doc__.split("\n\n")[2], file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
