@@ -100,6 +100,17 @@ if [ "$(find "$CONTEXT_KEEPER_DIR" -type f | wc -l)" -eq "$before" ]; then ok "r
 else no "resume: writes nothing to disk" "a file appeared"; fi
 printf 'garbage' | "$CK" resume > /dev/null; rc=$?
 if [ "$rc" -eq 0 ]; then ok "resume: garbage on stdin exits 0"; else no "resume: garbage on stdin exits 0" "rc $rc"; fi
+# Seven repositories edited one after another: the cap of six drops the one
+# touched first, never the newest. Found live: the newest one was cut.
+: > "$tmp/tr6.jsonl"
+for i in 1 2 3 4 5 6 7; do
+    git -C "$tmp" init -q "many-$i"
+    printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"%s/many-%s/f"}}]}}\n' "$tmp" "$i" >> "$tmp/tr6.jsonl"
+done
+ctx="$(printf '{"session_id":"s-6","transcript_path":"%s","cwd":"%s"}' "$tmp/tr6.jsonl" "$tmp" | "$CK" resume | field context)"
+case "$ctx" in *"many-7"*) case "$ctx" in *"many-1\`"*) no "resume: the cap keeps the newest repositories" "many-1 kept" ;;
+    *) ok "resume: the cap keeps the newest repositories" ;; esac ;;
+    *) no "resume: the cap keeps the newest repositories" "many-7 dropped" ;; esac
 
 # ── never fails a hook ──────────────────────────────────────────────────────
 printf 'garbage' | "$CK" snapshot; rc=$?

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1 — 2026-10-08
+
+### Fixed
+
+- **The cap of six repositories dropped the newest one.** Repositories were
+  listed in the order they were first touched, so in a session that touched
+  seven, the one edited last was the one cut. The working directory's
+  repository comes first, then the others newest first, in both the snapshot
+  and the resume block.
+
 ## 0.2.0 — 2026-10-08
 
 ### Added

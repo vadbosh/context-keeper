@@ -157,8 +157,10 @@ def kb_state(roots):
 
 
 def repo_roots(cwd, files):
+    """The working directory's repository, then the others newest first, so
+    the cap of six drops the repositories touched longest ago."""
     roots = []
-    for p in [cwd] + files:
+    for p in [cwd] + files[::-1]:
         r = git_root(p)
         if r and r not in roots:
             roots.append(r)
