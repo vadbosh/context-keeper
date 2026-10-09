@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.1 — 2026-10-09
+
+### Security
+
+- **Snapshot and resume no longer run a repository's own code.** Both run
+  `git status` in every repository the session wrote into, and `git status`
+  starts the program named by that repository's `core.fsmonitor`. A
+  repository unpacked from an untrusted archive could carry that setting in
+  its `.git/config` and run a program each time the hook fired. Every git
+  call now passes `-c core.fsmonitor=false`. Found by a security review.
+
 ## 0.5.0 — 2026-10-08
 
 ### Added

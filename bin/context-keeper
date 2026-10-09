@@ -121,6 +121,14 @@ def scan_transcript(path):
     return files[-MAX_FILES:], requests[-MAX_REQUESTS:], last
 
 
+# The directories git runs in come from the transcript: any repository the
+# session wrote into, an unpacked archive included. `git status` runs the
+# program named by that repository's own core.fsmonitor, so a planted
+# .git/config would execute code whenever the hook fires. Every git call here
+# switches it off.
+GIT = ["git", "-c", "core.fsmonitor=false"]
+
+
 def run(cmd, cwd=None):
     try:
         r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=10)
@@ -135,13 +143,13 @@ def git_root(path):
     d = path if os.path.isdir(path) else os.path.dirname(path)
     while d and not os.path.isdir(d):
         d = os.path.dirname(d)
-    return run(["git", "-C", d, "rev-parse", "--show-toplevel"]) if d else ""
+    return run([*GIT, "-C",d, "rev-parse", "--show-toplevel"]) if d else ""
 
 
 def git_state(root):
-    branch = run(["git", "-C", root, "status", "-sb"]).splitlines()[:1]
-    changes = run(["git", "-C", root, "status", "--short"]).splitlines()
-    log = run(["git", "-C", root, "log", "--oneline", "-5"])
+    branch = run([*GIT, "-C",root, "status", "-sb"]).splitlines()[:1]
+    changes = run([*GIT, "-C",root, "status", "--short"]).splitlines()
+    log = run([*GIT, "-C",root, "log", "--oneline", "-5"])
     out = [f"### {root}", "", "```", *(branch or ["(no branch line)"])]
     out += changes[:15] + ([f"... {len(changes) - 15} more"] if len(changes) > 15 else [])
     out += ["", log or "(no commits)", "```"]
@@ -370,9 +378,9 @@ def cmd_resume():
         ]
         new_commits = 0
         for root in roots[:6]:
-            branch = run(["git", "-C", root, "status", "-sb"]).splitlines()[:1]
-            changes = run(["git", "-C", root, "status", "--short"]).splitlines()
-            since = run(["git", "-C", root, "log", "--oneline", "-10",
+            branch = run([*GIT, "-C",root, "status", "-sb"]).splitlines()[:1]
+            changes = run([*GIT, "-C",root, "status", "--short"]).splitlines()
+            since = run([*GIT, "-C",root, "log", "--oneline", "-10",
                          f"--since={last}"]).splitlines() if then else []
             new_commits += len(since)
             if not changes and not since:

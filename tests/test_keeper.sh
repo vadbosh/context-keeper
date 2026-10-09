@@ -112,6 +112,22 @@ case "$ctx" in *"many-7"*) case "$ctx" in *"many-1\`"*) no "resume: the cap keep
     *) ok "resume: the cap keeps the newest repositories" ;; esac ;;
     *) no "resume: the cap keeps the newest repositories" "many-7 dropped" ;; esac
 
+# ── a repository from the transcript runs none of its own code ──────────────
+# An unpacked archive can carry a .git/config whose core.fsmonitor names a
+# program; plain `git status` runs it. Snapshot and resume must not.
+evil="$tmp/evil"
+git -C "$tmp" init -q evil
+printf '#!/bin/sh\ntouch "%s/fsmonitor-ran"\n' "$tmp" > "$tmp/fsmon.sh"; chmod +x "$tmp/fsmon.sh"
+git -C "$evil" config core.fsmonitor "$tmp/fsmon.sh"
+git -C "$evil" status --short > /dev/null 2>&1
+if [ -e "$tmp/fsmonitor-ran" ]; then rm -f -- "$tmp/fsmonitor-ran"; armed=1; else armed=0; fi
+printf '{"type":"assistant","timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"%s/f"}}]}}\n' "$evil" > "$tmp/tr-evil.jsonl"
+for cmd in snapshot resume; do
+    printf '{"session_id":"s-evil","transcript_path":"%s","cwd":"%s","trigger":"manual"}' "$tmp/tr-evil.jsonl" "$evil" | "$CK" "$cmd" > /dev/null 2>&1
+done
+if [ "$armed" -eq 1 ] && [ ! -e "$tmp/fsmonitor-ran" ]; then ok "snapshot, resume: the repository's core.fsmonitor is not run"
+else no "snapshot, resume: the repository's core.fsmonitor is not run" "fixture armed=$armed, marker $( [ -e "$tmp/fsmonitor-ran" ] && echo present || echo absent)"; fi
+
 # ── auto-compaction is the user's call ──────────────────────────────────────
 out="$(printf '{"session_id":"s-7","transcript_path":"%s","cwd":"%s","trigger":"auto"}' "$tr" "$repo" | "$CK" snapshot)"; rc=$?
 dec="$(printf '%s' "$out" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("decision", ""))')"
